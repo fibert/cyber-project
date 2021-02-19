@@ -11,7 +11,7 @@
 //using namespace std;
 
 int queryWMI(std::string[], const wchar_t *, const wchar_t *, const wchar_t*);
-float checkLatestHotfix();
+float checkLatestSecurityHotfix();
 
 
 int c = 0;
@@ -31,7 +31,7 @@ void agentMain() {
 
     float  fScore = 0;
     
-    fScore = checkLatestHotfix();
+    fScore = checkLatestSecurityHotfix();
 
     //queryWMI(L"ROOT\\CIMV2", "Win32_OperatingSystem", L"NAME");
 
@@ -49,12 +49,13 @@ void agentMain() {
     return;
 }
 
-float checkLatestHotfix() {
+float checkLatestSecurityHotfix() {
 
     std::string latestHotfixes[] = {"KB4601050", "KB4561600", "KB4566785", "KB4570334" }; // TODO: move this to config
     std::string results[64];
 
     // TODO: Log results
+    // TODO: Write recommended action somewhere
 
     if (queryWMI(results, L"ROOT\\CIMV2", L"Win32_quickfixengineering", L"HotfixID") == 1) {
         // Something went wrong
