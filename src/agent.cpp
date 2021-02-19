@@ -2,15 +2,20 @@
 #include <agent.h>
 
 #define _WIN32_DCOM
+#include <string>
 #include <iostream>
 #include <comdef.h>
 #include <Wbemidl.h>
 
 #pragma comment(lib, "wbemuuid.lib")
-using namespace std;
-//int c = 0;
+//using namespace std;
 
-int queryWMI(const wchar_t *, const char *, const wchar_t*);
+int queryWMI(std::string[], const wchar_t *, const wchar_t *, const wchar_t*);
+float checkLatestHotfix();
+
+
+int c = 0;
+
 void agentMain() {
      //c = (c + 1) % 3;
 
@@ -24,14 +29,57 @@ void agentMain() {
      //    setRed();
      //}
 
+    float  fScore = 0;
     
+    fScore = checkLatestHotfix();
 
-    queryWMI(L"ROOT\\CIMV2", "Win32_OperatingSystem", L"NAME");
+    //queryWMI(L"ROOT\\CIMV2", "Win32_OperatingSystem", L"NAME");
+
+
+    if (fScore >= 9) {
+        setGreen();
+    }
+    else if (fScore >= 5) {
+        setYellow();
+    }
+    else {
+        setRed();
+    }
+
     return;
 }
 
+float checkLatestHotfix() {
 
-int queryWMI(const wchar_t *targetNamespace, const char *targetClass, const wchar_t *targetField)
+    std::string latestHotfixes[] = {"KB4601050", "KB4561600", "KB4566785", "KB4570334" }; // TODO: move this to config
+    std::string results[64];
+
+    // TODO: Log results
+
+    if (queryWMI(results, L"ROOT\\CIMV2", L"Win32_quickfixengineering", L"HotfixID") == 1) {
+        // Something went wrong
+        return -1;
+    }
+
+    //OutputDebugStringA(results[0].c_str());
+
+
+    if (results[0].compare(latestHotfixes[0]) == 0) {
+        return 10.0;
+    }
+    if (results[0].compare(latestHotfixes[1]) == 0) {
+        return 9.0;
+    }
+    if (results[0].compare(latestHotfixes[2]) == 0) {
+        return 7.0;
+    }
+    if (results[0].compare(latestHotfixes[3]) == 0) {
+        return 4.0;
+    }
+    return 0;
+}
+
+int queryWMI(std::string *str_results, const wchar_t *targetNamespace, const wchar_t *targetClass, const wchar_t *targetField)
 {
     HRESULT hres;
 
@@ -41,8 +89,8 @@ int queryWMI(const wchar_t *targetNamespace, const char *targetClass, const wcha
     hres = CoInitializeEx(0, COINIT_MULTITHREADED);
     if (FAILED(hres))
     {
-        cout << "Failed to initialize COM library. Error code = 0x"
-            << hex << hres << endl;
+        std::cout << "Failed to initialize COM library. Error code = 0x"
+            << std::hex << hres << std::endl;
         return 1;                  // Program has failed.
     }
 
@@ -64,8 +112,8 @@ int queryWMI(const wchar_t *targetNamespace, const char *targetClass, const wcha
 
     if (FAILED(hres))
     {
-        cout << "Failed to initialize security. Error code = 0x"
-            << hex << hres << endl;
+        std::cout << "Failed to initialize security. Error code = 0x"
+            << std::hex << hres << std::endl;
         CoUninitialize();
         return 1;                    // Program has failed.
     }
@@ -83,9 +131,9 @@ int queryWMI(const wchar_t *targetNamespace, const char *targetClass, const wcha
 
     if (FAILED(hres))
     {
-        cout << "Failed to create IWbemLocator object."
+        std::cout << "Failed to create IWbemLocator object."
             << " Err code = 0x"
-            << hex << hres << endl;
+            << std::hex << hres << std::endl;
         CoUninitialize();
         return 1;                 // Program has failed.
     }
@@ -111,14 +159,14 @@ int queryWMI(const wchar_t *targetNamespace, const char *targetClass, const wcha
 
     if (FAILED(hres))
     {
-        cout << "Could not connect. Error code = 0x"
-            << hex << hres << endl;
+        std::cout << "Could not connect. Error code = 0x"
+            << std::hex << hres << std::endl;
         pLoc->Release();
         CoUninitialize();
         return 1;                // Program has failed.
     }
 
-    cout << "Connected to ROOT\\CIMV2 WMI namespace" << endl;
+    std::cout << "Connected to ROOT\\CIMV2 WMI namespace" << std::endl;
 
 
     // Step 5: --------------------------------------------------
@@ -137,8 +185,8 @@ int queryWMI(const wchar_t *targetNamespace, const char *targetClass, const wcha
 
     if (FAILED(hres))
     {
-        cout << "Could not set proxy blanket. Error code = 0x"
-            << hex << hres << endl;
+        std::cout << "Could not set proxy blanket. Error code = 0x"
+            << std::hex << hres << std::endl;
         pSvc->Release();
         pLoc->Release();
         CoUninitialize();
@@ -150,8 +198,8 @@ int queryWMI(const wchar_t *targetNamespace, const char *targetClass, const wcha
 
     // For example, get the name of the operating system
 
-    char WMIQuery[64];
-    sprintf(WMIQuery, "SELECT * FROM %s", targetClass);
+    wchar_t WMIQuery[64];
+    swprintf(WMIQuery, L"SELECT * FROM %s", targetClass);
 
     IEnumWbemClassObject* pEnumerator = NULL;
     hres = pSvc->ExecQuery(
@@ -163,9 +211,9 @@ int queryWMI(const wchar_t *targetNamespace, const char *targetClass, const wcha
 
     if (FAILED(hres))
     {
-        cout << "Query for operating system name failed."
+        std::cout << "Query for operating system name failed."
             << " Error code = 0x"
-            << hex << hres << endl;
+            << std::hex << hres << std::endl;
         pSvc->Release();
         pLoc->Release();
         CoUninitialize();
@@ -177,6 +225,8 @@ int queryWMI(const wchar_t *targetNamespace, const char *targetClass, const wcha
 
     IWbemClassObject* pclsObj = NULL;
     ULONG uReturn = 0;
+
+
 
     while (pEnumerator)
     {
@@ -194,12 +244,15 @@ int queryWMI(const wchar_t *targetNamespace, const char *targetClass, const wcha
         hr = pclsObj->Get(targetField, 0, &vtProp, 0, 0);
         
         _bstr_t bb(vtProp.bstrVal);
-        char* out = bb;
+        //char* out = bb;
+        *str_results = std::string(bb);// str(bb);
+        /*OutputDebugStringA(out);*/
 
-        OutputDebugStringA(out);
         VariantClear(&vtProp);
 
         pclsObj->Release();
+
+        str_results++;
     }
 
     // Cleanup
