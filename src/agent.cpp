@@ -6,11 +6,17 @@
 #include <iostream>
 #include <comdef.h>
 #include <Wbemidl.h>
+#include <cstdio>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <array>
 
 #pragma comment(lib, "wbemuuid.lib")
 //using namespace std;
 
 int queryWMI(std::string[], const wchar_t *, const wchar_t *, const wchar_t*);
+int runPowerShellCommand(std::string*, std::string);
 float checkLatestSecurityHotfix();
 
 
@@ -53,9 +59,24 @@ float checkLatestSecurityHotfix() {
 
     std::string latestHotfixes[] = {"KB4601050", "KB4561600", "KB4566785", "KB4570334" }; // TODO: move this to config
     std::string results[64];
+    std::string* psRes;// = "";
+    std::string a = "";
+    *psRes = a;
+    std::string psCmd = "Get-ComputerInfo";
 
     // TODO: Log results
     // TODO: Write recommended action somewhere
+    std::cout << "ORRRRRRRRRR" << std::endl;
+    OutputDebugStringA("ORRRRRRRRRR");
+
+    if (runPowerShellCommand(psRes, psCmd) == -1) {
+        // Something went wrong
+        std::cout << "ERROR -1" << std::endl;
+        OutputDebugStringA("ERROR -1");
+        return -1;
+    }
+    OutputDebugStringA("SUCCESS");
+    OutputDebugStringA(psRes->c_str());
 
     if (queryWMI(results, L"ROOT\\CIMV2", L"Win32_quickfixengineering", L"HotfixID") == 1) {
         // Something went wrong
@@ -76,6 +97,24 @@ float checkLatestSecurityHotfix() {
     }
     if (results[0].compare(latestHotfixes[3]) == 0) {
         return 4.0;
+    }
+    return 0;
+}
+
+int runPowerShellCommand(std::string* result, std::string psCommand)
+{
+    std::string cmd = "powershell" + psCommand;
+    //return system(cmd.c_str());
+
+    std::array<char, 128> buffer;
+    std::unique_ptr<FILE, decltype(&_pclose)> pipe(_popen(cmd.c_str(), "r"), _pclose);
+    if (!pipe) {
+        return -1;
+        //throw std::runtime_error("popen() failed!");
+    }
+    *result = "";
+    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
+        *result += buffer.data();
     }
     return 0;
 }
