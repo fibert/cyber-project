@@ -29,6 +29,18 @@ void agentMain() {
      //else if (c == 2) {
      //    setRed();
      //}
+    std::string psRes = std::string();
+    std::string psCmd = "Get-ComputerInfo";
+
+    if (runPowerShellCommand(&psRes, psCmd) == -1) {
+        // Something went wrong
+        OutputDebugStringA("ERROR in ps command\n");
+        return;
+    }
+    /*OutputDebugStringA("SUCCESS\nresult111: ");
+    OutputDebugStringA(psRes->c_str());
+    OutputDebugStringA("\n*******************************************\n");*/
+
 
     float  fScore = 0;
     
@@ -54,22 +66,9 @@ float checkLatestSecurityHotfix() {
 
     std::string latestHotfixes[] = {"KB4601050", "KB4561600", "KB4566785", "KB4570334" }; // TODO: move this to config
     std::string results[64];
-    std::string* psRes = &std::string();
-    std::string psCmd = "Get-ComputerInfo";
 
     // TODO: Log results
     // TODO: Write recommended action somewhere
-
-    if (runPowerShellCommand(psRes, psCmd) == -1) {
-        // Something went wrong
-        OutputDebugStringA("ERROR in ps command\n");
-        return -1;
-    }
-    /*OutputDebugStringA("SUCCESS\nresult111: ");
-    OutputDebugStringA(psRes->c_str());
-    OutputDebugStringA("\n*******************************************\n");*/
-
-
     if (queryWMI(results, L"ROOT\\CIMV2", L"Win32_quickfixengineering", L"HotfixID") == 1) {
         // Something went wrong
         return -1;
