@@ -6,11 +6,6 @@
 #include <iostream>
 #include <comdef.h>
 #include <Wbemidl.h>
-#include <cstdio>
-#include <memory>
-#include <stdexcept>
-#include <string>
-#include <array>
 
 #pragma comment(lib, "wbemuuid.lib")
 //using namespace std;
