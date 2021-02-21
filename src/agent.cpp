@@ -59,24 +59,21 @@ float checkLatestSecurityHotfix() {
 
     std::string latestHotfixes[] = {"KB4601050", "KB4561600", "KB4566785", "KB4570334" }; // TODO: move this to config
     std::string results[64];
-    std::string* psRes;// = "";
-    std::string a = "";
-    *psRes = a;
+    std::string* psRes = &std::string();
     std::string psCmd = "Get-ComputerInfo";
 
     // TODO: Log results
     // TODO: Write recommended action somewhere
-    std::cout << "ORRRRRRRRRR" << std::endl;
-    OutputDebugStringA("ORRRRRRRRRR");
 
     if (runPowerShellCommand(psRes, psCmd) == -1) {
         // Something went wrong
-        std::cout << "ERROR -1" << std::endl;
-        OutputDebugStringA("ERROR -1");
+        OutputDebugStringA("ERROR in ps command\n");
         return -1;
     }
-    OutputDebugStringA("SUCCESS");
+    /*OutputDebugStringA("SUCCESS\nresult111: ");
     OutputDebugStringA(psRes->c_str());
+    OutputDebugStringA("\n*******************************************\n");*/
+
 
     if (queryWMI(results, L"ROOT\\CIMV2", L"Win32_quickfixengineering", L"HotfixID") == 1) {
         // Something went wrong
@@ -103,19 +100,26 @@ float checkLatestSecurityHotfix() {
 
 int runPowerShellCommand(std::string* result, std::string psCommand)
 {
-    std::string cmd = "powershell" + psCommand;
-    //return system(cmd.c_str());
+    std::string cmd = "powershell " + psCommand;
+    char buffer[128];
 
-    std::array<char, 128> buffer;
-    std::unique_ptr<FILE, decltype(&_pclose)> pipe(_popen(cmd.c_str(), "r"), _pclose);
+    // Open pipe to file
+    FILE* pipe = _popen(cmd.c_str(), "r");
     if (!pipe) {
         return -1;
-        //throw std::runtime_error("popen() failed!");
     }
-    *result = "";
-    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
-        *result += buffer.data();
+
+    // Initialize the result
+    *result = std::string();
+    
+    // read till end of process:
+    while (!feof(pipe)) {
+        // use buffer to read and add to result
+        if (fgets(buffer, 128, pipe) != NULL)
+            *result += buffer;
     }
+
+    _pclose(pipe);
     return 0;
 }
 
