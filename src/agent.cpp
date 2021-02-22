@@ -14,7 +14,8 @@
 #pragma comment(lib, "wbemuuid.lib")
 //using namespace std;
 
-int queryWMI(std::string[], const wchar_t *, const wchar_t *, const wchar_t*);
+
+int queryWMI(std::vector<std::string> *, const wchar_t *, const wchar_t *, const wchar_t*);
 int runPowerShellCommand(std::vector<std::string> *, const char *);
 float checkLatestSecurityHotfix();
 float checkRootCA();
@@ -47,11 +48,11 @@ void agentMain() {
 float checkLatestSecurityHotfix() {
 
     std::string latestHotfixes[] = {"KB4601050", "KB4561600", "KB4566785", "KB4570334" }; // TODO: move this to config
-    std::string results[64];
+    std::vector<std::string> results;
 
     // TODO: Log results
     // TODO: Write recommended action somewhere
-    if (!queryWMI(results, L"ROOT\\CIMV2", L"Win32_quickfixengineering", L"HotfixID")) {
+    if (queryWMI(&results, L"ROOT\\CIMV2", L"Win32_quickfixengineering", L"HotfixID")) {
         // Something went wrong
         return -1;
     }
@@ -210,10 +211,10 @@ int runPowerShellCommand(std::vector<std::string> *v_result, const char *psComma
     return 0;
 }
 
-int queryWMI(std::string *str_results, const wchar_t *targetNamespace, const wchar_t *targetClass, const wchar_t *targetField)
-{
-    HRESULT hres;
 
+int initWMI() {
+    HRESULT hres;
+    
     // Step 1: --------------------------------------------------
     // Initialize COM. ------------------------------------------
 
@@ -248,6 +249,47 @@ int queryWMI(std::string *str_results, const wchar_t *targetNamespace, const wch
         CoUninitialize();
         return 1;                    // Program has failed.
     }
+
+    return 0;
+}
+
+int queryWMI(std::vector<std::string> *v_results, const wchar_t *targetNamespace, const wchar_t *targetClass, const wchar_t *targetField) {
+    HRESULT hres;
+
+    // Step 1: --------------------------------------------------
+    // Initialize COM. ------------------------------------------
+
+    //hres = CoInitializeEx(0, COINIT_MULTITHREADED);
+    //if (FAILED(hres))
+    //{
+    //    std::cout << "Failed to initialize COM library. Error code = 0x"
+    //        << std::hex << hres << std::endl;
+    //    return 1;                  // Program has failed.
+    //}
+
+    // Step 2: --------------------------------------------------
+    // Set general COM security levels --------------------------
+
+    //hres = CoInitializeSecurity(
+    //    NULL,
+    //    -1,                          // COM authentication
+    //    NULL,                        // Authentication services
+    //    NULL,                        // Reserved
+    //    RPC_C_AUTHN_LEVEL_DEFAULT,   // Default authentication 
+    //    RPC_C_IMP_LEVEL_IMPERSONATE, // Default Impersonation  
+    //    NULL,                        // Authentication info
+    //    EOAC_NONE,                   // Additional capabilities 
+    //    NULL                         // Reserved
+    //);
+
+
+    //if (FAILED(hres))
+    //{
+    //    std::cout << "Failed to initialize security. Error code = 0x"
+    //        << std::hex << hres << std::endl;
+    //    CoUninitialize();
+    //    return 1;                    // Program has failed.
+    //}
 
     // Step 3: ---------------------------------------------------
     // Obtain the initial locator to WMI -------------------------
@@ -375,15 +417,11 @@ int queryWMI(std::string *str_results, const wchar_t *targetNamespace, const wch
         hr = pclsObj->Get(targetField, 0, &vtProp, 0, 0);
         
         _bstr_t bb(vtProp.bstrVal);
-        //char* out = bb;
-        *str_results = std::string(bb);// str(bb);
-        /*OutputDebugStringA(out);*/
+        v_results->push_back(std::string(bb));
 
         VariantClear(&vtProp);
 
         pclsObj->Release();
-
-        str_results++;
     }
 
     // Cleanup
