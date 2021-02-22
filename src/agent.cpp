@@ -94,7 +94,7 @@ float checkLatestSecurityHotfix() {
 
 int runPowerShellCommand(std::string* result, std::string psCommand)
 {
-    std::string cmd = "powershell " + psCommand;
+    std::string cmd = "powershell -windowstyle hidden" + psCommand;
     char buffer[128];
 
     // Open pipe to file
