@@ -19,6 +19,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
        return -1;
    }
 
+   initWMI();
+
     while(TRUE)
     {
         
