@@ -11,7 +11,7 @@
 //using namespace std;
 
 int queryWMI(std::string[], const wchar_t *, const wchar_t *, const wchar_t*);
-int runPowerShellCommand(std::string*, std::string);
+int runPowerShellCommand(std::string *, const char *);
 float checkLatestSecurityHotfix();
 
 
@@ -92,25 +92,25 @@ float checkLatestSecurityHotfix() {
     return 0;
 }
 
-int runPowerShellCommand(std::string* result, std::string psCommand)
+int runPowerShellCommand(std::string *result, const char *psCommand)
 {
-    std::string cmd = "powershell -windowstyle hidden" + psCommand;
     char buffer[128];
 
+    char cmd[512] = "PowerShell.exe -windowstyle hidden -command ";
+    strcat_s(cmd, psCommand);
+
     // Open pipe to file
-    FILE* pipe = _popen(cmd.c_str(), "r");
+    FILE* pipe = _popen(cmd, "rt");
     if (!pipe) {
+        OutputDebugStringA("runPowerShellCommand: cannot create process\n");
         return -1;
     }
-
-    // Initialize the result
-    *result = std::string();
     
     // read till end of process:
     while (!feof(pipe)) {
         // use buffer to read and add to result
         if (fgets(buffer, 128, pipe) != NULL)
-            *result += buffer;
+            result->append(buffer);
     }
 
     _pclose(pipe);
