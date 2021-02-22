@@ -32,7 +32,7 @@ void agentMain() {
     std::string psRes = std::string();
     std::string psCmd = "Get-ComputerInfo";
 
-    if (runPowerShellCommand(&psRes, psCmd) == -1) {
+    if (!runPowerShellCommand(&psRes, psCmd)) {
         // Something went wrong
         OutputDebugStringA("ERROR in ps command\n");
         return;
@@ -69,7 +69,7 @@ float checkLatestSecurityHotfix() {
 
     // TODO: Log results
     // TODO: Write recommended action somewhere
-    if (queryWMI(results, L"ROOT\\CIMV2", L"Win32_quickfixengineering", L"HotfixID") == 1) {
+    if (!queryWMI(results, L"ROOT\\CIMV2", L"Win32_quickfixengineering", L"HotfixID")) {
         // Something went wrong
         return -1;
     }
