@@ -17,38 +17,19 @@
 int queryWMI(std::string[], const wchar_t *, const wchar_t *, const wchar_t*);
 int runPowerShellCommand(std::vector<std::string> *, const char *);
 float checkLatestSecurityHotfix();
+float checkRootCA();
+float checkListeningTCPPorts();
+float checkHttpsOrHttp();
 
-
-int c = 0;
 
 void agentMain() {
-     //c = (c + 1) % 3;
-
-     //if (c == 0) {
-     //    setGreen();
-     //}
-     //else if (c == 1) {
-     //    setYellow();
-     //}
-     //else if (c == 2) {
-     //    setRed();
-     //}
-    //std::string psRes[64];
-    std::vector<std::string> psRes;
-    const char *psCmd = "dir Cert:\\CurrentUser\\AuthRoot | Select-Object -Property Thumbprint | ft -HideTableHeaders ; echo EOF";
-    DWORD x;
-    if (x = runPowerShellCommand(&psRes, psCmd)) {
-        // Something went wrong
-        OutputDebugStringA("ERROR in ps command\n");
-        return;
-    }
 
     float  fScore = 0;
     
-    fScore = checkLatestSecurityHotfix();
-
-    //queryWMI(L"ROOT\\CIMV2", "Win32_OperatingSystem", L"NAME");
-
+    fScore += checkLatestSecurityHotfix();
+    fScore += checkRootCA();
+    fScore += checkListeningTCPPorts();
+    fScore += checkHttpsOrHttp();
 
     if (fScore >= 9) {
         setGreen();
@@ -90,6 +71,54 @@ float checkLatestSecurityHotfix() {
     if (results[0].compare(latestHotfixes[3]) == 0) {
         return 4.0;
     }
+    return 0;
+}
+
+float checkRootCA() {
+    // Get a list of all the trusted root CA Thumbprints
+    const char* cmd = "dir Cert:\CurrentUser\AuthRoot | Select-Object -Property Thumbprint | ft -HideTableHeaders ; echo EOF";
+    std::vector<std::string> certs;
+
+    if (runPowerShellCommand(&certs, cmd)) {
+        // Something went wrong
+    }
+
+    // Compare here to known certs
+
+    return 0;
+}
+
+float checkListeningTCPPorts() {
+    // Get number of listening TCP ports (that does not listen on 127.0.0.1)
+    const char *cmd = "(get-nettcpconnection | Where{ ($_.State -eq \"Listen\") -and ($_.LocalAddress -ne \"127.0.0.1\")}).Length ; echo EOF";
+    std::vector<std::string> ports;
+
+    if (runPowerShellCommand(&ports, cmd)) {
+        // Something went wrong
+    }
+
+    // Decide what to do with port list
+
+    return 0;
+}
+
+float checkHttpsOrHttp() {
+    // Get number of established TCP connections on ports 443 and 80
+    const char *cmdHttps = "(get-nettcpconnection | Where {($_.State -eq \"Established\") -and ($_.RemotePort -eq \"443\")}).Length ; echo EOF";
+    const char *cmdHttp = "(get-nettcpconnection | Where {($_.State -eq \"Established\") -and ($_.RemotePort -eq \"80\")}).Length ; echo EOF";
+    std::vector<std::string> httpsCons;
+    std::vector<std::string> httpCons;
+
+    if (runPowerShellCommand(&httpsCons, cmdHttps)) {
+        // Something went wrong
+    }
+
+    if (runPowerShellCommand(&httpCons, cmdHttp)) {
+        // Something went wrong
+    }
+
+    // Decide what to do with the number of HTTPS and HTTP connections
+
     return 0;
 }
 
