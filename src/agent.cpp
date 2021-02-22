@@ -14,7 +14,8 @@
 #pragma comment(lib, "wbemuuid.lib")
 //using namespace std;
 
-int queryWMI(std::string[], const wchar_t *, const wchar_t *, const wchar_t*);
+
+int queryWMI(std::vector<std::string> *, const wchar_t *, const wchar_t *, const wchar_t*);
 int runPowerShellCommand(std::vector<std::string> *, const char *);
 float checkLatestSecurityHotfix();
 float checkRootCA();
@@ -47,11 +48,11 @@ void agentMain() {
 float checkLatestSecurityHotfix() {
 
     std::string latestHotfixes[] = {"KB4601050", "KB4561600", "KB4566785", "KB4570334" }; // TODO: move this to config
-    std::string results[64];
+    std::vector<std::string> results;
 
     // TODO: Log results
     // TODO: Write recommended action somewhere
-    if (!queryWMI(results, L"ROOT\\CIMV2", L"Win32_quickfixengineering", L"HotfixID")) {
+    if (queryWMI(&results, L"ROOT\\CIMV2", L"Win32_quickfixengineering", L"HotfixID")) {
         // Something went wrong
         return -1;
     }
@@ -416,15 +417,11 @@ int queryWMI(std::vector<std::string> *v_results, const wchar_t *targetNamespace
         hr = pclsObj->Get(targetField, 0, &vtProp, 0, 0);
         
         _bstr_t bb(vtProp.bstrVal);
-        //char* out = bb;
-        *str_results = std::string(bb);// str(bb);
-        /*OutputDebugStringA(out);*/
+        v_results->push_back(std::string(bb));
 
         VariantClear(&vtProp);
 
         pclsObj->Release();
-
-        str_results++;
     }
 
     // Cleanup
