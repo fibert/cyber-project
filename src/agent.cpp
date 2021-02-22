@@ -6,12 +6,16 @@
 #include <iostream>
 #include <comdef.h>
 #include <Wbemidl.h>
+#include <io.h>
+#include <fcntl.h>
+#include <fstream>
+#include <vector>
 
 #pragma comment(lib, "wbemuuid.lib")
 //using namespace std;
 
 int queryWMI(std::string[], const wchar_t *, const wchar_t *, const wchar_t*);
-int runPowerShellCommand(std::string *, const char *);
+int runPowerShellCommand(std::vector<std::string> *, const char *);
 float checkLatestSecurityHotfix();
 
 
@@ -29,18 +33,15 @@ void agentMain() {
      //else if (c == 2) {
      //    setRed();
      //}
-    std::string psRes = std::string();
-    std::string psCmd = "Get-ComputerInfo";
-
-    if (!runPowerShellCommand(&psRes, psCmd)) {
+    //std::string psRes[64];
+    std::vector<std::string> psRes;
+    const char *psCmd = "dir Cert:\\CurrentUser\\AuthRoot | Select-Object -Property Thumbprint | ft -HideTableHeaders ; echo EOF";
+    DWORD x;
+    if (x = runPowerShellCommand(&psRes, psCmd)) {
         // Something went wrong
         OutputDebugStringA("ERROR in ps command\n");
         return;
     }
-    /*OutputDebugStringA("SUCCESS\nresult111: ");
-    OutputDebugStringA(psRes->c_str());
-    OutputDebugStringA("\n*******************************************\n");*/
-
 
     float  fScore = 0;
     
@@ -92,28 +93,91 @@ float checkLatestSecurityHotfix() {
     return 0;
 }
 
-int runPowerShellCommand(std::string *result, const char *psCommand)
-{
-    char buffer[128];
 
-    char cmd[512] = "PowerShell.exe -windowstyle hidden -command ";
+int runPowerShellCommand(std::vector<std::string> *v_result, const char *psCommand)
+{
+    HANDLE m_hChildStd_OUT_Rd = NULL;
+    HANDLE m_hChildStd_OUT_Wr = NULL;
+    HANDLE m_hreadDataFromExtProgram = NULL;
+
+    char cmd[256] = "PowerShell.exe -windowstyle hidden -command ";
     strcat_s(cmd, psCommand);
 
-    // Open pipe to file
-    FILE* pipe = _popen(cmd, "rt");
-    if (!pipe) {
-        OutputDebugStringA("runPowerShellCommand: cannot create process\n");
-        return -1;
-    }
-    
-    // read till end of process:
-    while (!feof(pipe)) {
-        // use buffer to read and add to result
-        if (fgets(buffer, 128, pipe) != NULL)
-            result->append(buffer);
+    STARTUPINFO si;
+    PROCESS_INFORMATION pi;
+    SECURITY_ATTRIBUTES saAttr;
+
+    ZeroMemory(&saAttr, sizeof(saAttr));
+    saAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
+    saAttr.bInheritHandle = TRUE;
+    saAttr.lpSecurityDescriptor = NULL;
+
+    // Create a pipe for the child process's STDOUT. 
+
+    if (!CreatePipe(&m_hChildStd_OUT_Rd, &m_hChildStd_OUT_Wr, &saAttr, 0))
+    {
+        // log error
+        return 1;
     }
 
-    _pclose(pipe);
+    // Ensure the read handle to the pipe for STDOUT is not inherited.
+
+    if (!SetHandleInformation(m_hChildStd_OUT_Rd, HANDLE_FLAG_INHERIT, 0))
+    {
+        // log error
+        return 2;
+    }
+
+    ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+    si.hStdError = m_hChildStd_OUT_Wr;
+    si.hStdOutput = m_hChildStd_OUT_Wr;
+    si.dwFlags |= STARTF_USESTDHANDLES;
+
+    ZeroMemory(&pi, sizeof(pi));
+
+    // Start the child process. 
+    if (!CreateProcessA(NULL,           // No module name (use command line)
+        (TCHAR*)cmd,    // Command line
+        NULL,                           // Process handle not inheritable
+        NULL,                           // Thread handle not inheritable
+        TRUE,                           // Set handle inheritance to FALSE
+        CREATE_NO_WINDOW,               // No creation flags
+        NULL,                           // Use parent's environment block
+        NULL,                           // Use parent's starting directory 
+        &si,                            // Pointer to STARTUPINFO structure
+        &pi)                            // Pointer to PROCESS_INFORMATION structure
+        ) {
+        return 3;
+    }
+ 
+    const int BUFSIZE = 512;
+    DWORD dwRead;
+    CHAR chBuf[BUFSIZE];
+    BOOL bSuccess = FALSE;
+
+    int fd;
+    if ((fd = _open_osfhandle(((intptr_t)m_hChildStd_OUT_Rd), _O_RDONLY | _O_TEXT)) == -1) {
+        return 4;
+    }
+
+    FILE *f = _fdopen(fd, "r");
+
+    std::string line;
+
+    while (fgets(chBuf, BUFSIZE, f)) {
+        line = chBuf;
+        line = line.substr(0, line.length() - 1);
+
+        if (line == "")
+            continue;
+
+        if (line == "EOF")
+            break;
+
+        v_result->push_back(line);
+    }
+
     return 0;
 }
 
