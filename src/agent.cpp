@@ -76,17 +76,96 @@ float checkLatestSecurityHotfix() {
 }
 
 float checkRootCA() {
+    /**
+    * Check that the current system Trusted Root CAs are a subset of a known Trusted Root CA
+    */
+    
+    std::vector<std::string> v_knownRootCASorted = {
+        "58E8ABB0361533FB80F79B1B6D29D3FF8D5F00F0",
+        "590D2D7D884F402E617EA562321765CF17D894E9",
+        "51501FBFCE69189D609CFAF140C576755DCC1FDF",
+        "490A7574DE870A47FE58EEF6C76BEBC60B124099",
+        "4EB6D578499B1CCF5F581EAD56BE3D9B6744A5E5",
+        "5F3B8CF2F810B37D78B4CEEC1919C37334B9C774",
+        "75E0ABB6138512271C04F85FDDDE38E4B7242EFE",
+        "8782C6C304353BCFD29692D2593E7D44D934FF11",
+        "742C3192E607E424EB4549542BE1BBC53E6174E2",
+        "5FB7EE0633E259DBAD0C4C9AE6D38F1A61C7DC25",
+        "6252DC40F71143A22FDE9EF7348E064251B18118",
+        "47BEABC922EAE80E78783462A79F45C254FDE68B",
+        "07E032E020B72C3F192F0628A2593A19A70F069E",
+        "093C61F38B8BDC7D55DF7538020500E125F5C836",
+        "06F1AA330B927B753A40E68CDF22E34BCBEF3352",
+        "02FAF3E291435468607857694DF5E45B68851868",
+        "0563B8630D62D75ABBC8AB1E4BDFB5A899B24D43",
+        "1F24C630CDA418EF2069FFAD4FDD5F463A1B69AA",
+        "36B12B49F9819ED74C9EBC380FC6568F5DACB2F7",
+        "3E2BF7F2031B96F38CE6C4D8A85D3E2D58476A0F",
+        "3679CA35668772304D30A5FB873B0FA77BB70D54",
+        "2796BAE63F1801E277261BA0D77770028F20EEE4",
+        "2B8F1B57330DBBA2D07A6C51F70EE90DDAB9AD8E",
+        "D4DE20D05E66FC53FE1A50882C78DB2852CAE474",
+        "D69B561148F01C77C54578C10926DF5B856976AD",
+        "D1EB23A46D17D68FD92564C2F1F1601764D8E349",
+        "CF9E876DD3EBFC422697A3B5A37AA076A9062348",
+        "D1CBCA5DB2D52A7F693B674DE5F05A1D0C957DF0",
+        "DAC9024F54D8F6DF94935FB1732638CA6AD77C13",
+        "E12DFB4B41D7D9C32B30514BAC1D81D8385E2D46",
+        "F373B387065A28848AF2F34ACE192BDDC78E9CAC",
+        "DF3C24F9BFD666761B268073FE06D1CC8D4F82A4",
+        "DE28F4A4FFE5B92FA3C503D1A349A7F9962A8212",
+        "DE3F40BD5093D39B6C60F6DABC076201008976C9",
+        "CA3AFBCF1240364B44B216208880483919937CF7",
+        "9F744E9F2B4DBAEC0F312C50B6563B8E2D93C311",
+        "A8985D3A65E5E5C4B2D7D66D40C6DD2FB19C5436",
+        "925A8F8D2C6D04E0665F596AFF22D863E8256F3F",
+        "8CF427FD790C3AD166068DE81E57EFBB932272D4",
+        "91C6D6EE3E8AC86384E548C299295C756C817B81",
+        "AD7E1C28B064EF8F6003402014C3D0E3370EB58A",
+        "B51C067CEE2B0C3DF855AB2D92F4FE39D4E70F0E",
+        "B7AB3308D1EA4477BA1480125A6FBDA936490CBB",
+        "B31EB1B740E36C8402DADC37D44DF5D4674952F9",
+        "AFE5D244A8D1194230FF479FE2F897BBCD7A8CB4",
+        "B1BC968BD4F49D622AA89A81F2150152A41D829C"
+    };
+    
     // Get a list of all the trusted root CA Thumbprints
-    const char* cmd = "dir Cert:\CurrentUser\AuthRoot | Select-Object -Property Thumbprint | ft -HideTableHeaders ; echo EOF";
-    std::vector<std::string> certs;
+    const char* cmd = "dir Cert:\\CurrentUser\\AuthRoot | Select-Object -Property Thumbprint | Sort-Object | ft -HideTableHeaders ; echo EOF";
+    std::vector<std::string> v_currentRootCASorted;
 
-    if (runPowerShellCommand(&certs, cmd)) {
+    if (runPowerShellCommand(&v_currentRootCASorted, cmd)) {
         // Something went wrong
+        return -1;
     }
 
-    // Compare here to known certs
 
-    return 0;
+    // Check that there are no "new" trusted Root CA that are not in the known Root CA list
+    // Both vectors are sorted, we can use this fact to iterate both of them together.
+
+    std::vector<std::string>::iterator it_knownCA = v_knownRootCASorted.begin();
+
+    for (std::vector<std::string>::iterator it_currentCA = v_currentRootCASorted.begin(); it_currentCA != v_currentRootCASorted.end(); ++it_currentCA) {
+        
+        while ((it_knownCA != v_knownRootCASorted.end()) && (*it_currentCA != *it_knownCA)) {
+            // Search for the current CA in v_knownRootCASorted
+            ++it_knownCA;
+        }
+
+        if (it_knownCA == v_knownRootCASorted.end()) {
+            // We reached the end of the known Root CA list
+            // The current CA is not in v_knownRootCASorted. This is a new unknown certificate!
+            return 0;
+        }
+
+        // Here we know that (*it_currentCA == *it_knownCA)
+        // We can increase them both and check the next CA
+        // (The for-loop will increase it_currentCA)
+        ++it_knownCA;
+    }
+        
+    // v_currentRootCASorted is contained by v_knownRootCASorted
+
+    return 10;
 }
 
 float checkListeningTCPPorts() {
