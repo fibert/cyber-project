@@ -10,18 +10,32 @@
 #include <fcntl.h>
 #include <fstream>
 #include <vector>
+#include <set>
+#include <unordered_map>
+#include <filesystem>
+
+#include <tchar.h>
+#include <stdlib.h>
+#include <Softpub.h>
+#include <wincrypt.h>
+#include <wintrust.h>
 
 #pragma comment(lib, "wbemuuid.lib")
+#pragma comment (lib, "wintrust")
 //using namespace std;
 
 
 int queryWMI(std::vector<std::string> *, const wchar_t *, const wchar_t *, const wchar_t*);
 int runPowerShellCommand(std::vector<std::string> *, const char *);
+BOOL VerifyEmbeddedSignature(LPCWSTR);
+
+float checkSignedPEs();
 float checkLatestSecurityHotfix();
 float checkRootCA();
 float checkListeningTCPPorts();
 float checkHttpsOrHttp();
 
+std::unordered_map<std::wstring, bool> um_verifiedPEs;
 
 void agentMain() {
 
@@ -31,6 +45,7 @@ void agentMain() {
     fScore += checkRootCA();
     fScore += checkListeningTCPPorts();
     fScore += checkHttpsOrHttp();
+    fScore += checkSignedPEs();
 
     if (fScore >= 9) {
         setGreen();
@@ -73,6 +88,108 @@ float checkLatestSecurityHotfix() {
         return 4.0;
     }
     return 0;
+}
+
+float checkSignedPEs() {
+
+    float score = 10;
+
+    std::set<std::wstring> set_PEToVerify;
+    
+    HKEY hKey;
+    wchar_t ValueName[256];
+    DWORD chValueName;
+    DWORD Type;
+    BYTE Data[MAX_PATH*2];
+    DWORD cbData;
+    LSTATUS status;
+    int index;
+
+    std::wstring ws_filename;
+
+    std::unordered_map<std::wstring, bool> um_verifyWhitelist = {
+        {L"%windir%\\system32\\SecurityHealthSystray.exe", true}
+    };
+
+    std::vector<std::string> registryRunPaths = {
+        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",
+        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce"
+    };
+
+    for (auto const& it_path : registryRunPaths) {
+        for (int j = 0; j < 2; j++) {
+            // j is used for opening 2 different registry roots
+            RegOpenKeyA(j == 0 ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER, it_path.c_str(), &hKey);
+
+            index = 0;
+            while (true) {
+                cbData = sizeof(Data) / 2;
+                chValueName = sizeof(ValueName) / 2;
+
+                status = RegEnumValueW(hKey, index, ValueName, &chValueName, NULL, &Type, Data, &cbData);
+
+                if (status != ERROR_SUCCESS) {
+                    break;
+                }
+
+                index++;
+
+                ws_filename = std::wstring(((wchar_t*)Data));
+
+                // Remove any \" at the start of the PE path
+                if (ws_filename[0] == '\"') {
+                    ws_filename.erase(ws_filename.begin(), ws_filename.begin() + 1);
+                }
+
+                // Remove any arguments and trailing \" characters after the PE path
+                size_t exe = ws_filename.find(L".exe");
+                if (exe != std::wstring::npos) {
+                    ws_filename.erase(exe + 4);
+                    set_PEToVerify.insert(ws_filename);
+                }
+
+            }
+
+            RegCloseKey(hKey);
+        }
+    }
+
+
+    for (auto const& ws_pathToVerify : set_PEToVerify) {
+
+        // Check if this path was already verified - if it was, skip it
+        auto it = um_verifiedPEs.find(ws_pathToVerify);
+        if (it != um_verifiedPEs.end()) {
+            if (it->second) {
+                // This PE was succesfully verified in the past
+                continue;
+            }
+            else {
+                // This PE's verification failed in the past
+                score = 0;
+                continue;
+            }
+        }
+
+        // Check if this path is in the verify whitelist - if it is, skip it
+        if (um_verifyWhitelist.find(ws_pathToVerify) != um_verifyWhitelist.end()) {
+            continue;
+        }
+
+        // Verify this PE
+        bool b_verifyResult = VerifyEmbeddedSignature(ws_pathToVerify.c_str());
+
+        if (!b_verifyResult) {
+            score = 0;
+        }
+
+        // Add this path um_verifiedPEs so it would not be verified again
+        um_verifiedPEs.insert({ ws_pathToVerify, b_verifyResult });
+
+
+    }
+
+    return score;
 }
 
 float checkRootCA() {
@@ -434,4 +551,115 @@ int queryWMI(std::vector<std::string> *v_results, const wchar_t *targetNamespace
 
     return 0;   // Program successfully completed.
 
+}
+
+
+BOOL VerifyEmbeddedSignature(LPCWSTR pwszSourceFile)
+{
+    BOOL result;
+    LONG lStatus;
+    DWORD dwLastError;
+
+    // If file does not exists, return true
+    if (!std::filesystem::exists(pwszSourceFile)) {
+        return true;
+    }
+
+    // Initialize the WINTRUST_FILE_INFO structure.
+
+    WINTRUST_FILE_INFO FileData;
+    memset(&FileData, 0, sizeof(FileData));
+    FileData.cbStruct = sizeof(WINTRUST_FILE_INFO);
+    FileData.pcwszFilePath = pwszSourceFile;
+    FileData.hFile = NULL;
+    FileData.pgKnownSubject = NULL;
+
+    /*
+    WVTPolicyGUID specifies the policy to apply on the file
+    WINTRUST_ACTION_GENERIC_VERIFY_V2 policy checks:
+
+    1) The certificate used to sign the file chains up to a root
+    certificate located in the trusted root certificate store. This
+    implies that the identity of the publisher has been verified by
+    a certification authority.
+
+    2) In cases where user interface is displayed (which this example
+    does not do), WinVerifyTrust will check for whether the
+    end entity certificate is stored in the trusted publisher store,
+    implying that the user trusts content from this publisher.
+
+    3) The end entity certificate has sufficient permission to sign
+    code, as indicated by the presence of a code signing EKU or no
+    EKU.
+    */
+
+    GUID WVTPolicyGUID = WINTRUST_ACTION_GENERIC_VERIFY_V2;
+    WINTRUST_DATA WinTrustData;
+
+    // Initialize the WinVerifyTrust input data structure.
+
+    // Default all fields to 0.
+    memset(&WinTrustData, 0, sizeof(WinTrustData));
+
+    WinTrustData.cbStruct = sizeof(WinTrustData);
+
+    // Use default code signing EKU.
+    WinTrustData.pPolicyCallbackData = NULL;
+
+    // No data to pass to SIP.
+    WinTrustData.pSIPClientData = NULL;
+
+    // Disable WVT UI.
+    WinTrustData.dwUIChoice = WTD_UI_NONE;
+
+    // No revocation checking.
+    WinTrustData.fdwRevocationChecks = WTD_REVOKE_NONE;
+
+    // Verify an embedded signature on a file.
+    WinTrustData.dwUnionChoice = WTD_CHOICE_FILE;
+
+    // Verify action.
+    WinTrustData.dwStateAction = WTD_STATEACTION_VERIFY;
+
+    // Verification sets this value.
+    WinTrustData.hWVTStateData = NULL;
+
+    // Not used.
+    WinTrustData.pwszURLReference = NULL;
+
+    // This is not applicable if there is no UI because it changes 
+    // the UI to accommodate running applications instead of 
+    // installing applications.
+    WinTrustData.dwUIContext = 0;
+
+    // Set pFile.
+    WinTrustData.pFile = &FileData;
+
+    // WinVerifyTrust verifies signatures as specified by the GUID 
+    // and Wintrust_Data.
+    lStatus = WinVerifyTrust(
+        NULL,
+        &WVTPolicyGUID,
+        &WinTrustData);
+
+    switch (lStatus)
+    {
+    case ERROR_SUCCESS:
+        result = true;
+        break;
+
+    default:
+        result = false;
+        break;
+    }
+
+    // Any hWVTStateData must be released by a call with close.
+    WinTrustData.dwStateAction = WTD_STATEACTION_CLOSE;
+
+    lStatus = WinVerifyTrust(
+        NULL,
+        &WVTPolicyGUID,
+        &WinTrustData);
+
+    return result;
 }
