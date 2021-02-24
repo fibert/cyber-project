@@ -22,6 +22,8 @@
 
 #include <shlobj_core.h>
 
+#include "spdlog/spdlog.h"
+
 #pragma comment(lib, "wbemuuid.lib")
 #pragma comment (lib, "wintrust")
 //using namespace std;
@@ -40,6 +42,7 @@ float checkHttpsOrHttp();
 std::unordered_map<std::wstring, bool> um_verifiedPEs;
 
 void agentMain() {
+    spdlog::info("********** Agent scan began **********");
 
     float  fScore = 0;
     
@@ -59,6 +62,7 @@ void agentMain() {
         setRed();
     }
 
+    spdlog::info("********** Agent scan finished **********");
     return;
 }
 
