@@ -80,6 +80,8 @@ float checkRootCA() {
     * Check that the current system Trusted Root CAs are a subset of a known Trusted Root CA
     */
     
+    float score = 10;
+
     std::vector<std::string> v_knownRootCASorted = {
         "58E8ABB0361533FB80F79B1B6D29D3FF8D5F00F0",
         "590D2D7D884F402E617EA562321765CF17D894E9",
@@ -153,7 +155,8 @@ float checkRootCA() {
         if (it_knownCA == v_knownRootCASorted.end()) {
             // We reached the end of the known Root CA list
             // The current CA is not in v_knownRootCASorted. This is a new unknown certificate!
-            return 0;
+            score = 0;
+            break;
         }
 
         // Here we know that (currentCA == *it_knownCA)
@@ -164,7 +167,7 @@ float checkRootCA() {
         
     // v_currentRootCASorted is contained by v_knownRootCASorted
 
-    return 10;
+    return score;
 }
 
 float checkListeningTCPPorts() {
