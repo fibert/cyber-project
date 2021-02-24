@@ -36,8 +36,9 @@ BOOL VerifyEmbeddedSignature(LPCWSTR);
 float checkSignedPEs();
 float checkLatestSecurityHotfix();
 float checkRootCA();
-float checkListeningTCPPorts();
 float checkHttpsOrHttp();
+float checkListenningPorts();
+
 
 std::unordered_map<std::wstring, bool> um_verifiedPEs;
 
@@ -48,9 +49,9 @@ void agentMain() {
     
     fScore += checkLatestSecurityHotfix();
     fScore += checkRootCA();
-    fScore += checkListeningTCPPorts();
     fScore += checkHttpsOrHttp();
     fScore += checkSignedPEs();
+    fScore += checkListenningPorts();
 
     if (fScore >= 9) {
         setGreen();
@@ -67,6 +68,39 @@ void agentMain() {
 
     spdlog::info(L"********** Agent scan finished **********");
     return;
+}
+
+float checkListenningPorts(){
+    std::set<std::string> v_blacklistPorts = {
+        "20",   // ftp
+        "21",   // ftp
+        "22",   // ssh
+        "443",  // https
+        "80",   // http
+        "23",   // telnet
+        "3389"  // rdp
+    };
+    const char* cmd = "Get-NetTCPConnection -State Listen | ? {$_.LocalAddress -notin (\'::\', \'127.0.0.1\')} | select LocalPort | sort-object -property LocalPort -Unique | ft -HideTableHeaders; echo EOF";
+    std::vector<std::string> v_openedPorts;
+    float score = 10;
+
+    if (runPowerShellCommand(&v_openedPorts, cmd)) {
+        // Something went wrong
+        spdlog::error(L"checkListenningPorts: Powershell command failed");
+        return -1;
+    }
+
+    for (auto& open_port : v_openedPorts)
+    {
+        open_port.erase(0, open_port.find_first_not_of(" ")); // erase spaces
+        
+        if (v_blacklistPorts.find(open_port) != v_blacklistPorts.end()){
+            spdlog::warn("checkListenningPorts: Found listenning port: {}", open_port);
+            score = 0;
+        }
+    }
+
+    return score;
 }
 
 float checkLatestSecurityHotfix() {
@@ -333,20 +367,6 @@ float checkRootCA() {
     return score;
 }
 
-float checkListeningTCPPorts() {
-    // Get number of listening TCP ports (that does not listen on 127.0.0.1)
-    const char *cmd = "(get-nettcpconnection | Where{ ($_.State -eq \"Listen\") -and ($_.LocalAddress -ne \"127.0.0.1\")}).Length ; echo EOF";
-    std::vector<std::string> ports;
-
-    if (runPowerShellCommand(&ports, cmd)) {
-        // Something went wrong
-    }
-
-    // Decide what to do with port list
-
-    return 0;
-}
-
 float checkHttpsOrHttp() {
     // Get number of established TCP connections on ports 443 and 80
     const char *cmdHttps = "(get-nettcpconnection | Where {($_.State -eq \"Established\") -and ($_.RemotePort -eq \"443\")}).Length ; echo EOF";
@@ -374,8 +394,9 @@ int runPowerShellCommand(std::vector<std::string> *v_result, const char *psComma
     HANDLE m_hChildStd_OUT_Wr = NULL;
     HANDLE m_hreadDataFromExtProgram = NULL;
 
-    char cmd[256] = "PowerShell.exe -windowstyle hidden -command ";
+    char cmd[256] = "PowerShell.exe -windowstyle hidden -command \"";
     strcat_s(cmd, psCommand);
+    strcat_s(cmd, "\"");
 
     STARTUPINFO si;
     PROCESS_INFORMATION pi;
