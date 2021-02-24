@@ -12,6 +12,7 @@ void initLogger() {
     {
         auto file_logger = spdlog::rotating_logger_mt("file_logger", "log.txt", 1024 * 1024 * 5, 3);
         spdlog::set_default_logger(file_logger);
+        spdlog::set_pattern("[%Y-%m-%d %T] [%l] %v");
         spdlog::flush_on(spdlog::level::info);
     }
     catch (const spdlog::spdlog_ex& ex)
