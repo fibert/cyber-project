@@ -48,11 +48,11 @@ void agentMain() {
 
     float  fScore = 0;
     
-    /*fScore += checkLatestSecurityHotfix();
+    fScore += checkLatestSecurityHotfix();
     fScore += checkRootCA();
     fScore += checkListeningTCPPorts();
     fScore += checkHttpsOrHttp();
-    fScore += checkSignedPEs();*/
+    fScore += checkSignedPEs();
     fScore += checkListenningPorts();
 
     if (fScore >= 9) {
@@ -73,20 +73,35 @@ void agentMain() {
 }
 
 float checkListenningPorts(){
-    const char* cmd = "Get - NetTCPConnection - State Listen | ? {$_.LocalAddress - notin(\"::\", \"127.0.0.1\")} | select LocalPort | sort - object - property LocalPort - Unique | ft - HideTableHeaders; echo EOF";
+    std::set<std::string> v_blacklistPorts = {
+        "20",   // ftp
+        "21",   // ftp
+        "22",   // ssh
+        "443",  // https
+        "80",   // http
+        "23",   // telnet
+        "3389"  // rdp
+    };
+    const char* cmd = "Get-NetTCPConnection -State Listen | ? {$_.LocalAddress -notin (\'::\', \'127.0.0.1\')} | select LocalPort | sort-object -property LocalPort -Unique | ft -HideTableHeaders; echo EOF";
     std::vector<std::string> v_openedPorts;
-    
+    float score = 10;
+
     if (runPowerShellCommand(&v_openedPorts, cmd)) {
         // Something went wrong
         return -1;
     }
 
-    for (auto const& open_port : v_openedPorts)
+    for (auto& open_port : v_openedPorts)
     {
-        OutputDebugStringA("port: ");
-        OutputDebugStringA(open_port.c_str());
-        OutputDebugStringA("\n");
+        open_port.erase(0, open_port.find_first_not_of(" ")); // erase spaces
+        
+        if (v_blacklistPorts.find(open_port) != v_blacklistPorts.end()){
+            spdlog::warn("checkListenningPorts: Found listenning port: {}", open_port);
+            score = 0;
+        }
     }
+
+    return score;
 }
 
 float checkLatestSecurityHotfix() {
@@ -394,8 +409,9 @@ int runPowerShellCommand(std::vector<std::string> *v_result, const char *psComma
     HANDLE m_hChildStd_OUT_Wr = NULL;
     HANDLE m_hreadDataFromExtProgram = NULL;
 
-    char cmd[256] = "PowerShell.exe -windowstyle hidden -command ";
+    char cmd[256] = "PowerShell.exe -windowstyle hidden -command \"";
     strcat_s(cmd, psCommand);
+    strcat_s(cmd, "\"");
 
     STARTUPINFO si;
     PROCESS_INFORMATION pi;
