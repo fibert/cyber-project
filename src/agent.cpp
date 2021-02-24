@@ -22,6 +22,8 @@
 
 #include <shlobj_core.h>
 
+#include "spdlog/spdlog.h"
+
 #pragma comment(lib, "wbemuuid.lib")
 #pragma comment (lib, "wintrust")
 //using namespace std;
@@ -41,7 +43,8 @@ float checkListenningPorts();
 
 std::unordered_map<std::wstring, bool> um_verifiedPEs;
 
-void agentMain() {
+void agentMain() {    
+    spdlog::info(L"********** Agent scan began **********");
 
     float  fScore = 0;
     
@@ -54,14 +57,18 @@ void agentMain() {
 
     if (fScore >= 9) {
         setGreen();
+        spdlog::info(L"Scan Result: Green");
     }
     else if (fScore >= 5) {
         setYellow();
+        spdlog::info(L"Scan Result: Yellow");
     }
     else {
         setRed();
+        spdlog::info(L"Scan Result: Red");
     }
 
+    spdlog::info(L"********** Agent scan finished **********");
     return;
 }
 
@@ -221,6 +228,7 @@ float checkSignedPEs() {
             }
             else {
                 // This PE's verification failed in the past
+                spdlog::warn(L"checkSignedPEs: Cannot verify the signature of: {}", ws_pathToVerify);
                 score = 0;
                 continue;
             }
@@ -235,6 +243,7 @@ float checkSignedPEs() {
         bool b_verifyResult = VerifyEmbeddedSignature(ws_pathToVerify.c_str());
 
         if (!b_verifyResult) {
+            spdlog::warn(L"checkSignedPEs: Cannot verify the signature of: {}", ws_pathToVerify);
             score = 0;
         }
 
@@ -309,6 +318,7 @@ float checkRootCA() {
 
     if (runPowerShellCommand(&v_currentRootCASorted, cmd)) {
         // Something went wrong
+        spdlog::error(L"checkRootCA: Powershell command failed");
         return -1;
     }
 
@@ -327,6 +337,7 @@ float checkRootCA() {
         if (it_knownCA == v_knownRootCASorted.end()) {
             // We reached the end of the known Root CA list
             // The current CA is not in v_knownRootCASorted. This is a new unknown certificate!
+            spdlog::warn("checkRootCA: Unknown Trusted Root CA: {}", currentCA);
             score = 0;
             break;
         }
