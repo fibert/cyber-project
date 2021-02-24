@@ -123,6 +123,7 @@ float checkSignedPEs() {
 
             index = 0;
             while (true) {
+                // We use wide characters, so we need to divide by 2
                 cbData = sizeof(Data) / 2;
                 chValueName = sizeof(ValueName) / 2;
 
@@ -141,9 +142,10 @@ float checkSignedPEs() {
                     ws_filename.erase(ws_filename.begin(), ws_filename.begin() + 1);
                 }
 
-                // Remove any arguments and trailing \" characters after the PE path
+                // Add we check only files that end with ".exe"
                 size_t exe = ws_filename.find(L".exe");
                 if (exe != std::wstring::npos) {
+                    // Remove any arguments and trailing \" characters after the PE path
                     ws_filename.erase(exe + 4);
                     set_PEToVerify.insert(ws_filename);
                 }
