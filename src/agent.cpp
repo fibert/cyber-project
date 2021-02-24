@@ -10,39 +10,114 @@
 #include <fcntl.h>
 #include <fstream>
 #include <vector>
+#include <set>
+#include <unordered_map>
+#include <filesystem>
+
+#include <tchar.h>
+#include <stdlib.h>
+#include <Softpub.h>
+#include <wincrypt.h>
+#include <wintrust.h>
+
+#include <shlobj_core.h>
+
+#include "spdlog/spdlog.h"
 
 #pragma comment(lib, "wbemuuid.lib")
+#pragma comment (lib, "wintrust")
 //using namespace std;
 
 
 int queryWMI(std::vector<std::string> *, const wchar_t *, const wchar_t *, const wchar_t*);
 int runPowerShellCommand(std::vector<std::string> *, const char *);
+BOOL VerifyEmbeddedSignature(LPCWSTR);
+
+float checkSignedPEs();
 float checkLatestSecurityHotfix();
 float checkRootCA();
-float checkListeningTCPPorts();
-float checkHttpsOrHttp();
+float checkHttp();
+float checkListenningPorts();
 
 
-void agentMain() {
+std::unordered_map<std::wstring, bool> um_verifiedPEs;
 
-    float  fScore = 0;
-    
-    fScore += checkLatestSecurityHotfix();
-    fScore += checkRootCA();
-    fScore += checkListeningTCPPorts();
-    fScore += checkHttpsOrHttp();
+void agentMain() {    
+    spdlog::info(L"********** Agent scan began **********");
+
+    float fScore = 0;
+    float score = 0;
+    int amountFailed = 0;
+
+    std::vector<float(*)()> v_checkFunctiond = {
+        checkLatestSecurityHotfix,
+        checkRootCA,
+        checkHttp,
+        checkSignedPEs,
+        checkListenningPorts
+    };
+
+    for (auto& chckfnc : v_checkFunctiond) {
+        score = chckfnc();
+
+        if (score < 0) {
+            ++amountFailed; // ignore failed functions
+            continue;
+        }
+        
+        fScore += score;
+    }
+
+    fScore /= (v_checkFunctiond.size() - amountFailed);
 
     if (fScore >= 9) {
         setGreen();
+        spdlog::info(L"Scan Result: Green");
     }
     else if (fScore >= 5) {
         setYellow();
+        spdlog::info(L"Scan Result: Yellow");
     }
     else {
         setRed();
+        spdlog::info(L"Scan Result: Red");
     }
 
+    spdlog::info(L"********** Agent scan finished **********");
     return;
+}
+
+float checkListenningPorts(){
+    std::set<std::string> v_blacklistPorts = {
+        "20",   // ftp
+        "21",   // ftp
+        "22",   // ssh
+        "443",  // https
+        "80",   // http
+        "23",   // telnet
+        "3389"  // rdp
+    };
+    const char* cmd = "Get-NetTCPConnection -State Listen | ? {$_.LocalAddress -notin (\'::\', \'127.0.0.1\')} | select LocalPort | sort-object -property LocalPort -Unique | ft -HideTableHeaders";
+    std::vector<std::string> v_openedPorts;
+    float score = 10;
+
+    if (runPowerShellCommand(&v_openedPorts, cmd)) {
+        // Something went wrong
+        spdlog::error(L"checkListenningPorts: Powershell command failed");
+        return -1;
+    }
+
+    for (auto& open_port : v_openedPorts)
+    {
+        open_port.erase(0, open_port.find_first_not_of(" ")); // erase spaces
+        
+        if (v_blacklistPorts.find(open_port) != v_blacklistPorts.end()){
+            spdlog::warn("checkListenningPorts: Found listenning port: {}", open_port);
+            score = 0;
+        }
+    }
+
+    return score;
 }
 
 float checkLatestSecurityHotfix() {
@@ -75,52 +150,241 @@ float checkLatestSecurityHotfix() {
     return 0;
 }
 
+float checkSignedPEs() {
+
+    float score = 10;
+
+    std::set<std::wstring> set_PEToVerify;
+    
+    HKEY hKey;
+    wchar_t ValueName[256];
+    DWORD chValueName;
+    DWORD Type;
+    BYTE Data[MAX_PATH*2];
+    DWORD cbData;
+    LSTATUS status;
+    int index;
+
+    std::wstring ws_filename;
+
+    std::unordered_map<std::wstring, bool> um_verifyWhitelist = {
+        {L"%windir%\\system32\\SecurityHealthSystray.exe", true}
+    };
+
+    std::vector<std::string> registryRunPaths = {
+        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",
+        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce"
+    };
+
+    for (auto const& it_path : registryRunPaths) {
+        for (int j = 0; j < 2; j++) {
+            // j is used for opening 2 different registry roots
+            RegOpenKeyA(j == 0 ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER, it_path.c_str(), &hKey);
+
+            index = 0;
+            while (true) {
+                // We use wide characters, so we need to divide by 2
+                cbData = sizeof(Data) / 2;
+                chValueName = sizeof(ValueName) / 2;
+
+                status = RegEnumValueW(hKey, index, ValueName, &chValueName, NULL, &Type, Data, &cbData);
+
+                if (status != ERROR_SUCCESS) {
+                    break;
+                }
+
+                index++;
+
+                ws_filename = std::wstring(((wchar_t*)Data));
+
+                // Remove any \" at the start of the PE path
+                if (ws_filename[0] == '\"') {
+                    ws_filename.erase(ws_filename.begin(), ws_filename.begin() + 1);
+                }
+
+                // Add we check only files that end with ".exe"
+                size_t exe = ws_filename.find(L".exe");
+                if (exe != std::wstring::npos) {
+                    // Remove any arguments and trailing \" characters after the PE path
+                    ws_filename.erase(exe + 4);
+                    set_PEToVerify.insert(ws_filename);
+                }
+
+            }
+
+            RegCloseKey(hKey);
+        }
+    }
+
+    std::vector<std::wstring> v_startupPaths;
+    PWSTR w_path;
+    
+    // Add current user's startup folder to v_startupPaths
+    SHGetKnownFolderPath(FOLDERID_Startup, 0, NULL, &w_path);
+    v_startupPaths.push_back(w_path);
+
+    // Add common startup folder to v_startupPaths
+    SHGetKnownFolderPath(FOLDERID_CommonStartup, 0, NULL, &w_path);
+    v_startupPaths.push_back(w_path);
+
+    for (auto const& path : v_startupPaths) {
+        for (auto const& file : std::filesystem::directory_iterator(path)) {
+            
+            // If this is not a regular file, continue to the next file
+            if (!std::filesystem::is_regular_file(file)) {
+                continue;
+            }
+
+            ws_filename = file.path();
+
+            // If this file does not contain ".exe", continue to the next file
+            size_t exe = ws_filename.find(L".exe");
+            if (exe == std::wstring::npos) {  
+                continue;
+            }
+
+            set_PEToVerify.insert(ws_filename);
+        }
+    }
+
+
+    for (auto const& ws_pathToVerify : set_PEToVerify) {
+
+        // Check if this path was already verified - if it was, skip it
+        auto it = um_verifiedPEs.find(ws_pathToVerify);
+        if (it != um_verifiedPEs.end()) {
+            if (it->second) {
+                // This PE was succesfully verified in the past
+                continue;
+            }
+            else {
+                // This PE's verification failed in the past
+                spdlog::warn(L"checkSignedPEs: Cannot verify the signature of: {}", ws_pathToVerify);
+                score = 0;
+                continue;
+            }
+        }
+
+        // Check if this path is in the verify whitelist - if it is, skip it
+        if (um_verifyWhitelist.find(ws_pathToVerify) != um_verifyWhitelist.end()) {
+            continue;
+        }
+
+        // Verify this PE
+        bool b_verifyResult = VerifyEmbeddedSignature(ws_pathToVerify.c_str());
+
+        if (!b_verifyResult) {
+            spdlog::warn(L"checkSignedPEs: Cannot verify the signature of: {}", ws_pathToVerify);
+            score = 0;
+        }
+
+        // Add this path um_verifiedPEs so it would not be verified again
+        um_verifiedPEs.insert({ ws_pathToVerify, b_verifyResult });
+
+
+    }
+
+    return score;
+}
+
 float checkRootCA() {
+    /**
+    * Check that the current system Trusted Root CAs are a subset of a known Trusted Root CA
+    */
+    
+    float score = 10;
+
+    std::unordered_map<std::string, bool> um_knownRootCASorted = {
+        {"58E8ABB0361533FB80F79B1B6D29D3FF8D5F00F0", true},
+        {"590D2D7D884F402E617EA562321765CF17D894E9", true},
+        {"51501FBFCE69189D609CFAF140C576755DCC1FDF", true},
+        {"490A7574DE870A47FE58EEF6C76BEBC60B124099", true},
+        {"4EB6D578499B1CCF5F581EAD56BE3D9B6744A5E5", true},
+        {"5F3B8CF2F810B37D78B4CEEC1919C37334B9C774", true},
+        {"75E0ABB6138512271C04F85FDDDE38E4B7242EFE", true},
+        {"8782C6C304353BCFD29692D2593E7D44D934FF11", true},
+        {"742C3192E607E424EB4549542BE1BBC53E6174E2", true},
+        {"5FB7EE0633E259DBAD0C4C9AE6D38F1A61C7DC25", true},
+        {"6252DC40F71143A22FDE9EF7348E064251B18118", true},
+        {"47BEABC922EAE80E78783462A79F45C254FDE68B", true},
+        {"07E032E020B72C3F192F0628A2593A19A70F069E", true},
+        {"093C61F38B8BDC7D55DF7538020500E125F5C836", true},
+        {"06F1AA330B927B753A40E68CDF22E34BCBEF3352", true},
+        {"02FAF3E291435468607857694DF5E45B68851868", true},
+        {"0563B8630D62D75ABBC8AB1E4BDFB5A899B24D43", true},
+        {"1F24C630CDA418EF2069FFAD4FDD5F463A1B69AA", true},
+        {"36B12B49F9819ED74C9EBC380FC6568F5DACB2F7", true},
+        {"3E2BF7F2031B96F38CE6C4D8A85D3E2D58476A0F", true},
+        {"3679CA35668772304D30A5FB873B0FA77BB70D54", true},
+        {"2796BAE63F1801E277261BA0D77770028F20EEE4", true},
+        {"2B8F1B57330DBBA2D07A6C51F70EE90DDAB9AD8E", true},
+        {"D4DE20D05E66FC53FE1A50882C78DB2852CAE474", true},
+        {"D69B561148F01C77C54578C10926DF5B856976AD", true},
+        {"D1EB23A46D17D68FD92564C2F1F1601764D8E349", true},
+        {"CF9E876DD3EBFC422697A3B5A37AA076A9062348", true},
+        {"D1CBCA5DB2D52A7F693B674DE5F05A1D0C957DF0", true},
+        {"DAC9024F54D8F6DF94935FB1732638CA6AD77C13", true},
+        {"E12DFB4B41D7D9C32B30514BAC1D81D8385E2D46", true},
+        {"F373B387065A28848AF2F34ACE192BDDC78E9CAC", true},
+        {"DF3C24F9BFD666761B268073FE06D1CC8D4F82A4", true},
+        {"DE28F4A4FFE5B92FA3C503D1A349A7F9962A8212", true},
+        {"DE3F40BD5093D39B6C60F6DABC076201008976C9", true},
+        {"CA3AFBCF1240364B44B216208880483919937CF7", true},
+        {"9F744E9F2B4DBAEC0F312C50B6563B8E2D93C311", true},
+        {"A8985D3A65E5E5C4B2D7D66D40C6DD2FB19C5436", true},
+        {"925A8F8D2C6D04E0665F596AFF22D863E8256F3F", true},
+        {"8CF427FD790C3AD166068DE81E57EFBB932272D4", true},
+        {"91C6D6EE3E8AC86384E548C299295C756C817B81", true},
+        {"AD7E1C28B064EF8F6003402014C3D0E3370EB58A", true},
+        {"B51C067CEE2B0C3DF855AB2D92F4FE39D4E70F0E", true},
+        {"B7AB3308D1EA4477BA1480125A6FBDA936490CBB", true},
+        {"B31EB1B740E36C8402DADC37D44DF5D4674952F9", true},
+        {"AFE5D244A8D1194230FF479FE2F897BBCD7A8CB4", true},
+        {"B1BC968BD4F49D622AA89A81F2150152A41D829C", true}
+    };
+    
     // Get a list of all the trusted root CA Thumbprints
-    const char* cmd = "dir Cert:\CurrentUser\AuthRoot | Select-Object -Property Thumbprint | ft -HideTableHeaders ; echo EOF";
-    std::vector<std::string> certs;
+    const char* cmd = "dir Cert:\\CurrentUser\\AuthRoot | Select-Object -Property Thumbprint | Sort-Object | ft -HideTableHeaders";
+    std::vector<std::string> v_currentRootCASorted;
 
-    if (runPowerShellCommand(&certs, cmd)) {
+    if (runPowerShellCommand(&v_currentRootCASorted, cmd)) {
         // Something went wrong
+        spdlog::error(L"checkRootCA: Powershell command failed");
+        return -1;
     }
 
-    // Compare here to known certs
 
-    return 0;
-}
-
-float checkListeningTCPPorts() {
-    // Get number of listening TCP ports (that does not listen on 127.0.0.1)
-    const char *cmd = "(get-nettcpconnection | Where{ ($_.State -eq \"Listen\") -and ($_.LocalAddress -ne \"127.0.0.1\")}).Length ; echo EOF";
-    std::vector<std::string> ports;
-
-    if (runPowerShellCommand(&ports, cmd)) {
-        // Something went wrong
+    // Check that there are no "new" trusted Root CA that are not in the known Root CA list
+    for (auto const& currentCA : v_currentRootCASorted) {
+        if (um_knownRootCASorted.find(currentCA) == um_knownRootCASorted.end()) {
+            spdlog::warn("checkRootCA: Unknown Trusted Root CA: {}", currentCA);
+            score = 0;
+        }
     }
 
-    // Decide what to do with port list
-
-    return 0;
+    return score;
 }
 
-float checkHttpsOrHttp() {
-    // Get number of established TCP connections on ports 443 and 80
-    const char *cmdHttps = "(get-nettcpconnection | Where {($_.State -eq \"Established\") -and ($_.RemotePort -eq \"443\")}).Length ; echo EOF";
-    const char *cmdHttp = "(get-nettcpconnection | Where {($_.State -eq \"Established\") -and ($_.RemotePort -eq \"80\")}).Length ; echo EOF";
-    std::vector<std::string> httpsCons;
+float checkHttp() {
+    // Get number of established TCP connections on port 80
+    const char *cmdHttp = "get-nettcpconnection | Where {($_.State -eq 'Established') -and ($_.RemotePort -eq 80)} | select -Property RemoteAddress | ft -HideTableHeaders";
     std::vector<std::string> httpCons;
-
-    if (runPowerShellCommand(&httpsCons, cmdHttps)) {
-        // Something went wrong
-    }
+    float score = 10;
 
     if (runPowerShellCommand(&httpCons, cmdHttp)) {
         // Something went wrong
+        spdlog::error(L"checkHttp: Powershell command failed");
+        return -1;
     }
 
-    // Decide what to do with the number of HTTPS and HTTP connections
+    if (httpCons.size()){
+        for (auto const& httpConn : httpCons)
+            spdlog::warn("checkHttp: Found an insecure HTTP connection to: {}", httpConn);
 
-    return 0;
+        score = 0;
+    }
+
+    return score;
 }
 
 
@@ -130,8 +394,9 @@ int runPowerShellCommand(std::vector<std::string> *v_result, const char *psComma
     HANDLE m_hChildStd_OUT_Wr = NULL;
     HANDLE m_hreadDataFromExtProgram = NULL;
 
-    char cmd[256] = "PowerShell.exe -windowstyle hidden -command ";
+    char cmd[256] = "PowerShell.exe -windowstyle hidden -command \"";
     strcat_s(cmd, psCommand);
+    strcat_s(cmd, "; echo EOF\"");
 
     STARTUPINFO si;
     PROCESS_INFORMATION pi;
@@ -212,9 +477,9 @@ int runPowerShellCommand(std::vector<std::string> *v_result, const char *psComma
 }
 
 
-int initWMI() {
+int queryWMI(std::vector<std::string> *v_results, const wchar_t *targetNamespace, const wchar_t *targetClass, const wchar_t *targetField) {
     HRESULT hres;
-    
+
     // Step 1: --------------------------------------------------
     // Initialize COM. ------------------------------------------
 
@@ -249,47 +514,6 @@ int initWMI() {
         CoUninitialize();
         return 1;                    // Program has failed.
     }
-
-    return 0;
-}
-
-int queryWMI(std::vector<std::string> *v_results, const wchar_t *targetNamespace, const wchar_t *targetClass, const wchar_t *targetField) {
-    HRESULT hres;
-
-    // Step 1: --------------------------------------------------
-    // Initialize COM. ------------------------------------------
-
-    //hres = CoInitializeEx(0, COINIT_MULTITHREADED);
-    //if (FAILED(hres))
-    //{
-    //    std::cout << "Failed to initialize COM library. Error code = 0x"
-    //        << std::hex << hres << std::endl;
-    //    return 1;                  // Program has failed.
-    //}
-
-    // Step 2: --------------------------------------------------
-    // Set general COM security levels --------------------------
-
-    //hres = CoInitializeSecurity(
-    //    NULL,
-    //    -1,                          // COM authentication
-    //    NULL,                        // Authentication services
-    //    NULL,                        // Reserved
-    //    RPC_C_AUTHN_LEVEL_DEFAULT,   // Default authentication 
-    //    RPC_C_IMP_LEVEL_IMPERSONATE, // Default Impersonation  
-    //    NULL,                        // Authentication info
-    //    EOAC_NONE,                   // Additional capabilities 
-    //    NULL                         // Reserved
-    //);
-
-
-    //if (FAILED(hres))
-    //{
-    //    std::cout << "Failed to initialize security. Error code = 0x"
-    //        << std::hex << hres << std::endl;
-    //    CoUninitialize();
-    //    return 1;                    // Program has failed.
-    //}
 
     // Step 3: ---------------------------------------------------
     // Obtain the initial locator to WMI -------------------------
@@ -434,4 +658,115 @@ int queryWMI(std::vector<std::string> *v_results, const wchar_t *targetNamespace
 
     return 0;   // Program successfully completed.
 
+}
+
+
+BOOL VerifyEmbeddedSignature(LPCWSTR pwszSourceFile)
+{
+    BOOL result;
+    LONG lStatus;
+    DWORD dwLastError;
+
+    // If file does not exists, return true
+    if (!std::filesystem::exists(pwszSourceFile)) {
+        return true;
+    }
+
+    // Initialize the WINTRUST_FILE_INFO structure.
+
+    WINTRUST_FILE_INFO FileData;
+    memset(&FileData, 0, sizeof(FileData));
+    FileData.cbStruct = sizeof(WINTRUST_FILE_INFO);
+    FileData.pcwszFilePath = pwszSourceFile;
+    FileData.hFile = NULL;
+    FileData.pgKnownSubject = NULL;
+
+    /*
+    WVTPolicyGUID specifies the policy to apply on the file
+    WINTRUST_ACTION_GENERIC_VERIFY_V2 policy checks:
+
+    1) The certificate used to sign the file chains up to a root
+    certificate located in the trusted root certificate store. This
+    implies that the identity of the publisher has been verified by
+    a certification authority.
+
+    2) In cases where user interface is displayed (which this example
+    does not do), WinVerifyTrust will check for whether the
+    end entity certificate is stored in the trusted publisher store,
+    implying that the user trusts content from this publisher.
+
+    3) The end entity certificate has sufficient permission to sign
+    code, as indicated by the presence of a code signing EKU or no
+    EKU.
+    */
+
+    GUID WVTPolicyGUID = WINTRUST_ACTION_GENERIC_VERIFY_V2;
+    WINTRUST_DATA WinTrustData;
+
+    // Initialize the WinVerifyTrust input data structure.
+
+    // Default all fields to 0.
+    memset(&WinTrustData, 0, sizeof(WinTrustData));
+
+    WinTrustData.cbStruct = sizeof(WinTrustData);
+
+    // Use default code signing EKU.
+    WinTrustData.pPolicyCallbackData = NULL;
+
+    // No data to pass to SIP.
+    WinTrustData.pSIPClientData = NULL;
+
+    // Disable WVT UI.
+    WinTrustData.dwUIChoice = WTD_UI_NONE;
+
+    // No revocation checking.
+    WinTrustData.fdwRevocationChecks = WTD_REVOKE_NONE;
+
+    // Verify an embedded signature on a file.
+    WinTrustData.dwUnionChoice = WTD_CHOICE_FILE;
+
+    // Verify action.
+    WinTrustData.dwStateAction = WTD_STATEACTION_VERIFY;
+
+    // Verification sets this value.
+    WinTrustData.hWVTStateData = NULL;
+
+    // Not used.
+    WinTrustData.pwszURLReference = NULL;
+
+    // This is not applicable if there is no UI because it changes 
+    // the UI to accommodate running applications instead of 
+    // installing applications.
+    WinTrustData.dwUIContext = 0;
+
+    // Set pFile.
+    WinTrustData.pFile = &FileData;
+
+    // WinVerifyTrust verifies signatures as specified by the GUID 
+    // and Wintrust_Data.
+    lStatus = WinVerifyTrust(
+        NULL,
+        &WVTPolicyGUID,
+        &WinTrustData);
+
+    switch (lStatus)
+    {
+    case ERROR_SUCCESS:
+        result = true;
+        break;
+
+    default:
+        result = false;
+        break;
+    }
+
+    // Any hWVTStateData must be released by a call with close.
+    WinTrustData.dwStateAction = WTD_STATEACTION_CLOSE;
+
+    lStatus = WinVerifyTrust(
+        NULL,
+        &WVTPolicyGUID,
+        &WinTrustData);
+
+    return result;
 }
