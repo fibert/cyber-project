@@ -54,12 +54,15 @@ void agentMain() {
 
     if (fScore >= 9) {
         setGreen();
+        spdlog::info(L"Scan Result: Green");
     }
     else if (fScore >= 5) {
         setYellow();
+        spdlog::info(L"Scan Result: Yellow");
     }
     else {
         setRed();
+        spdlog::info(L"Scan Result: Red");
     }
 
     spdlog::info(L"********** Agent scan finished **********");
@@ -295,6 +298,7 @@ float checkRootCA() {
 
     if (runPowerShellCommand(&v_currentRootCASorted, cmd)) {
         // Something went wrong
+        spdlog::error(L"checkRootCA: Powershell command failed");
         return -1;
     }
 
@@ -313,6 +317,7 @@ float checkRootCA() {
         if (it_knownCA == v_knownRootCASorted.end()) {
             // We reached the end of the known Root CA list
             // The current CA is not in v_knownRootCASorted. This is a new unknown certificate!
+            spdlog::warn("checkRootCA: Unknown Trusted Root CA: {}", currentCA);
             score = 0;
             break;
         }
