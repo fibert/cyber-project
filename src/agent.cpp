@@ -20,6 +20,8 @@
 #include <wincrypt.h>
 #include <wintrust.h>
 
+#include <shlobj_core.h>
+
 #pragma comment(lib, "wbemuuid.lib")
 #pragma comment (lib, "wintrust")
 //using namespace std;
@@ -153,6 +155,37 @@ float checkSignedPEs() {
             }
 
             RegCloseKey(hKey);
+        }
+    }
+
+    std::vector<std::wstring> v_startupPaths;
+    PWSTR w_path;
+    
+    // Add current user's startup folder to v_startupPaths
+    SHGetKnownFolderPath(FOLDERID_Startup, 0, NULL, &w_path);
+    v_startupPaths.push_back(w_path);
+
+    // Add common startup folder to v_startupPaths
+    SHGetKnownFolderPath(FOLDERID_CommonStartup, 0, NULL, &w_path);
+    v_startupPaths.push_back(w_path);
+
+    for (auto const& path : v_startupPaths) {
+        for (auto const& file : std::filesystem::directory_iterator(path)) {
+            
+            // If this is not a regular file, continue to the next file
+            if (!std::filesystem::is_regular_file(file)) {
+                continue;
+            }
+
+            ws_filename = file.path();
+
+            // If this file does not contain ".exe", continue to the next file
+            size_t exe = ws_filename.find(L".exe");
+            if (exe == std::wstring::npos) {  
+                continue;
+            }
+
+            set_PEToVerify.insert(ws_filename);
         }
     }
 
