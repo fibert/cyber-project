@@ -36,6 +36,8 @@ float checkLatestSecurityHotfix();
 float checkRootCA();
 float checkListeningTCPPorts();
 float checkHttpsOrHttp();
+float checkListenningPorts();
+
 
 std::unordered_map<std::wstring, bool> um_verifiedPEs;
 
@@ -43,11 +45,12 @@ void agentMain() {
 
     float  fScore = 0;
     
-    fScore += checkLatestSecurityHotfix();
+    /*fScore += checkLatestSecurityHotfix();
     fScore += checkRootCA();
     fScore += checkListeningTCPPorts();
     fScore += checkHttpsOrHttp();
-    fScore += checkSignedPEs();
+    fScore += checkSignedPEs();*/
+    fScore += checkListenningPorts();
 
     if (fScore >= 9) {
         setGreen();
@@ -60,6 +63,23 @@ void agentMain() {
     }
 
     return;
+}
+
+float checkListenningPorts(){
+    const char* cmd = "Get - NetTCPConnection - State Listen | ? {$_.LocalAddress - notin(\"::\", \"127.0.0.1\")} | select LocalPort | sort - object - property LocalPort - Unique | ft - HideTableHeaders; echo EOF";
+    std::vector<std::string> v_openedPorts;
+    
+    if (runPowerShellCommand(&v_openedPorts, cmd)) {
+        // Something went wrong
+        return -1;
+    }
+
+    for (auto const& open_port : v_openedPorts)
+    {
+        OutputDebugStringA("port: ");
+        OutputDebugStringA(open_port.c_str());
+        OutputDebugStringA("\n");
+    }
 }
 
 float checkLatestSecurityHotfix() {
