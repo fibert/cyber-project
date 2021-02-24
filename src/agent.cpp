@@ -45,15 +45,30 @@ std::unordered_map<std::wstring, bool> um_verifiedPEs;
 void agentMain() {    
     spdlog::info(L"********** Agent scan began **********");
 
-    float  fScore = 0;
-    
-    //fScore += checkLatestSecurityHotfix();
-    //fScore += checkRootCA();
-    fScore += checkHttp();
-    //fScore += checkSignedPEs();
-    //fScore += checkListenningPorts();
+    float fScore = 0;
+    float score = 0;
+    int amountFailed = 0;
 
-    fScore /= 5;
+    std::vector<float(*)()> v_checkFunctiond = {
+        checkLatestSecurityHotfix,
+        checkRootCA,
+        checkHttp,
+        checkSignedPEs,
+        checkListenningPorts
+    };
+
+    for (auto& chckfnc : v_checkFunctiond) {
+        score = chckfnc();
+
+        if (score < 0) {
+            ++amountFailed; // ignore failed functions
+            continue;
+        }
+        
+        fScore += score;
+    }
+
+    fScore /= (v_checkFunctiond.size() - amountFailed);
 
     if (fScore >= 9) {
         setGreen();
@@ -82,7 +97,7 @@ float checkListenningPorts(){
         "23",   // telnet
         "3389"  // rdp
     };
-    const char* cmd = "Get-NetTCPConnection -State Listen | ? {$_.LocalAddress -notin (\'::\', \'127.0.0.1\')} | select LocalPort | sort-object -property LocalPort -Unique | ft -HideTableHeaders; echo EOF";
+    const char* cmd = "Get-NetTCPConnection -State Listen | ? {$_.LocalAddress -notin (\'::\', \'127.0.0.1\')} | select LocalPort | sort-object -property LocalPort -Unique | ft -HideTableHeaders";
     std::vector<std::string> v_openedPorts;
     float score = 10;
 
@@ -329,7 +344,7 @@ float checkRootCA() {
     };
     
     // Get a list of all the trusted root CA Thumbprints
-    const char* cmd = "dir Cert:\\CurrentUser\\AuthRoot | Select-Object -Property Thumbprint | Sort-Object | ft -HideTableHeaders ; echo EOF";
+    const char* cmd = "dir Cert:\\CurrentUser\\AuthRoot | Select-Object -Property Thumbprint | Sort-Object | ft -HideTableHeaders";
     std::vector<std::string> v_currentRootCASorted;
 
     if (runPowerShellCommand(&v_currentRootCASorted, cmd)) {
@@ -352,7 +367,7 @@ float checkRootCA() {
 
 float checkHttp() {
     // Get number of established TCP connections on port 80
-    const char *cmdHttp = "get-nettcpconnection | Where {($_.State -eq 'Established') -and ($_.RemotePort -eq 80)} | select -Property RemoteAddress | ft -HideTableHeaders; echo EOF";
+    const char *cmdHttp = "get-nettcpconnection | Where {($_.State -eq 'Established') -and ($_.RemotePort -eq 80)} | select -Property RemoteAddress | ft -HideTableHeaders";
     std::vector<std::string> httpCons;
     float score = 10;
 
@@ -381,7 +396,7 @@ int runPowerShellCommand(std::vector<std::string> *v_result, const char *psComma
 
     char cmd[256] = "PowerShell.exe -windowstyle hidden -command \"";
     strcat_s(cmd, psCommand);
-    strcat_s(cmd, "\"");
+    strcat_s(cmd, "; echo EOF\"");
 
     STARTUPINFO si;
     PROCESS_INFORMATION pi;
