@@ -144,9 +144,8 @@ float checkRootCA() {
 
     std::vector<std::string>::iterator it_knownCA = v_knownRootCASorted.begin();
 
-    for (std::vector<std::string>::iterator it_currentCA = v_currentRootCASorted.begin(); it_currentCA != v_currentRootCASorted.end(); ++it_currentCA) {
-        
-        while ((it_knownCA != v_knownRootCASorted.end()) && (*it_currentCA != *it_knownCA)) {
+    for (auto const& currentCA: v_currentRootCASorted) {        
+        while ((it_knownCA != v_knownRootCASorted.end()) && (currentCA != *it_knownCA)) {
             // Search for the current CA in v_knownRootCASorted
             ++it_knownCA;
         }
@@ -157,9 +156,9 @@ float checkRootCA() {
             return 0;
         }
 
-        // Here we know that (*it_currentCA == *it_knownCA)
+        // Here we know that (currentCA == *it_knownCA)
         // We can increase them both and check the next CA
-        // (The for-loop will increase it_currentCA)
+        // (The for-loop will increase currentCA)
         ++it_knownCA;
     }
         
