@@ -36,7 +36,7 @@ BOOL VerifyEmbeddedSignature(LPCWSTR);
 float checkSignedPEs();
 float checkLatestSecurityHotfix();
 float checkRootCA();
-float checkHttpsOrHttp();
+float checkHttp();
 float checkListenningPorts();
 
 
@@ -47,11 +47,11 @@ void agentMain() {
 
     float  fScore = 0;
     
-    fScore += checkLatestSecurityHotfix();
-    fScore += checkRootCA();
-    fScore += checkHttpsOrHttp();
-    fScore += checkSignedPEs();
-    fScore += checkListenningPorts();
+    //fScore += checkLatestSecurityHotfix();
+    //fScore += checkRootCA();
+    fScore += checkHttp();
+    //fScore += checkSignedPEs();
+    //fScore += checkListenningPorts();
 
     if (fScore >= 9) {
         setGreen();
@@ -367,24 +367,26 @@ float checkRootCA() {
     return score;
 }
 
-float checkHttpsOrHttp() {
-    // Get number of established TCP connections on ports 443 and 80
-    const char *cmdHttps = "(get-nettcpconnection | Where {($_.State -eq \"Established\") -and ($_.RemotePort -eq \"443\")}).Length ; echo EOF";
-    const char *cmdHttp = "(get-nettcpconnection | Where {($_.State -eq \"Established\") -and ($_.RemotePort -eq \"80\")}).Length ; echo EOF";
-    std::vector<std::string> httpsCons;
+float checkHttp() {
+    // Get number of established TCP connections on port 80
+    const char *cmdHttp = "get-nettcpconnection | Where {($_.State -eq 'Established') -and ($_.RemotePort -eq 80)} | select -Property RemoteAddress | ft -HideTableHeaders; echo EOF";
     std::vector<std::string> httpCons;
-
-    if (runPowerShellCommand(&httpsCons, cmdHttps)) {
-        // Something went wrong
-    }
+    float score = 10;
 
     if (runPowerShellCommand(&httpCons, cmdHttp)) {
         // Something went wrong
+        spdlog::error(L"checkHttp: Powershell command failed");
+        return -1;
     }
 
-    // Decide what to do with the number of HTTPS and HTTP connections
+    if (httpCons.size()){
+        for (auto const& httpConn : httpCons)
+            spdlog::warn("checkHttp: Found an insecure HTTP connection to: {}", httpConn);
 
-    return 0;
+        score = 0;
+    }
+
+    return score;
 }
 
 
