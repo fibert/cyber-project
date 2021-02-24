@@ -53,6 +53,8 @@ void agentMain() {
     fScore += checkSignedPEs();
     fScore += checkListenningPorts();
 
+    fScore /= 5;
+
     if (fScore >= 9) {
         setGreen();
         spdlog::info(L"Scan Result: Green");
