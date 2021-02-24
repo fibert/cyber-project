@@ -36,7 +36,6 @@ BOOL VerifyEmbeddedSignature(LPCWSTR);
 float checkSignedPEs();
 float checkLatestSecurityHotfix();
 float checkRootCA();
-float checkListeningTCPPorts();
 float checkHttpsOrHttp();
 float checkListenningPorts();
 
@@ -50,7 +49,6 @@ void agentMain() {
     
     fScore += checkLatestSecurityHotfix();
     fScore += checkRootCA();
-    fScore += checkListeningTCPPorts();
     fScore += checkHttpsOrHttp();
     fScore += checkSignedPEs();
     fScore += checkListenningPorts();
@@ -88,6 +86,7 @@ float checkListenningPorts(){
 
     if (runPowerShellCommand(&v_openedPorts, cmd)) {
         // Something went wrong
+        spdlog::error(L"checkListenningPorts: Powershell command failed");
         return -1;
     }
 
@@ -366,20 +365,6 @@ float checkRootCA() {
     // v_currentRootCASorted is contained by v_knownRootCASorted
 
     return score;
-}
-
-float checkListeningTCPPorts() {
-    // Get number of listening TCP ports (that does not listen on 127.0.0.1)
-    const char *cmd = "(get-nettcpconnection | Where{ ($_.State -eq \"Listen\") -and ($_.LocalAddress -ne \"127.0.0.1\")}).Length ; echo EOF";
-    std::vector<std::string> ports;
-
-    if (runPowerShellCommand(&ports, cmd)) {
-        // Something went wrong
-    }
-
-    // Decide what to do with port list
-
-    return 0;
 }
 
 float checkHttpsOrHttp() {
