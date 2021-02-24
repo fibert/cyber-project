@@ -41,8 +41,8 @@ float checkHttpsOrHttp();
 
 std::unordered_map<std::wstring, bool> um_verifiedPEs;
 
-void agentMain() {
-    spdlog::info("********** Agent scan began **********");
+void agentMain() {    
+    spdlog::info(L"********** Agent scan began **********");
 
     float  fScore = 0;
     
@@ -62,7 +62,7 @@ void agentMain() {
         setRed();
     }
 
-    spdlog::info("********** Agent scan finished **********");
+    spdlog::info(L"********** Agent scan finished **********");
     return;
 }
 
@@ -205,6 +205,7 @@ float checkSignedPEs() {
             }
             else {
                 // This PE's verification failed in the past
+                spdlog::warn(L"checkSignedPEs: Cannot verify the signature of: {}", ws_pathToVerify);
                 score = 0;
                 continue;
             }
@@ -219,6 +220,7 @@ float checkSignedPEs() {
         bool b_verifyResult = VerifyEmbeddedSignature(ws_pathToVerify.c_str());
 
         if (!b_verifyResult) {
+            spdlog::warn(L"checkSignedPEs: Cannot verify the signature of: {}", ws_pathToVerify);
             score = 0;
         }
 
