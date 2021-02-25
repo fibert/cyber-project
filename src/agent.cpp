@@ -122,29 +122,27 @@ float checkListenningPorts(){
 
 float checkLatestSecurityHotfix() {
 
-    std::string latestHotfixes[] = {"KB4601050", "KB4561600", "KB4566785", "KB4570334" }; // TODO: move this to config
+    std::string latestHotfixes[] = {"KB4601050", "KB4561600", "KB4566785", "KB4570334" };
     std::vector<std::string> results;
 
-    // TODO: Log results
-    // TODO: Write recommended action somewhere
     if (queryWMI(&results, L"ROOT\\CIMV2", L"Win32_quickfixengineering", L"HotfixID")) {
-        // Something went wrong
+        spdlog::error(L"checkLatestSecurityHotfix: WMI query failed");
         return -1;
     }
-
-    //OutputDebugStringA(results[0].c_str());
-
 
     if (results[0].compare(latestHotfixes[0]) == 0) {
         return 10.0;
     }
     if (results[0].compare(latestHotfixes[1]) == 0) {
+        spdlog::warn(L"checkLatestSecurityHotfix: This system is missing one hotfix");
         return 9.0;
     }
     if (results[0].compare(latestHotfixes[2]) == 0) {
+        spdlog::warn(L"checkLatestSecurityHotfix: This system is missing two hotfixes");
         return 7.0;
     }
     if (results[0].compare(latestHotfixes[3]) == 0) {
+        spdlog::warn(L"checkLatestSecurityHotfix: This system is missing more than two hotfixes");
         return 4.0;
     }
     return 0;
